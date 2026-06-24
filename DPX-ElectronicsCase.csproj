@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>DPX-ElectronicsCase</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="bin\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SPTarkov.Server.Core">
+      <HintPath>..\..\..\SPTarkov.Server.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SPTarkov.DI">
+      <HintPath>..\..\..\SPTarkov.DI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SemanticVersioning">
+      <HintPath>..\..\..\SemanticVersioning.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CopyDllToModRoot" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)" />
+  </Target>
+</Project>

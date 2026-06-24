@@ -1,0 +1,13 @@
+{
+  "manifest": [
+    {
+      "key": "dpx/electronics_case.bundle",
+      "dependencyKeys": [
+        "shaders",
+        "cubemaps",
+        "assets/commonassets/physics/physicsmaterials.bundle"
+      ]
+    }
+  ]
+}
+

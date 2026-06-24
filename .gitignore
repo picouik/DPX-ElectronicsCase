@@ -1,0 +1,10 @@
+bin/
+obj/
+*.log
+*.disabled
+*.tmp
+*.cache
+.vs/
+.idea/
+DPX_Asset_Builder_Test/
+*BundleTest*

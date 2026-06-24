@@ -1,0 +1,10 @@
+{
+  "name": "DPX-ElectronicsCase",
+  "version": "1.0.0",
+  "sptVersion": "~4.0.0",
+  "loadBefore": [],
+  "loadAfter": [],
+  "incompatibilities": [],
+  "isBundleMod": true,
+  "main": "DPX-ElectronicsCase.dll"
+}
