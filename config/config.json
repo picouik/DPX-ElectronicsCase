@@ -1,0 +1,17 @@
+{
+  "caseSize": {
+    "width": 3,
+    "height": 3
+  },
+  "internalGrid": {
+    "width": 10,
+    "height": 10
+  },
+  "price": 250000,
+  "trader": "Skier",
+  "loyaltyLevel": 1,
+  "acceptedCategories": [
+    "57864a66245977548f04a81f"
+  ],
+  "acceptedItems": []
+}

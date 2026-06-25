@@ -1,6 +1,6 @@
 {
   "name": "DPX-ElectronicsCase",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "sptVersion": "~4.0.0",
   "loadBefore": [],
   "loadAfter": [],

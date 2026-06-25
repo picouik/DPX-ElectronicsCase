@@ -1,8 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
@@ -21,7 +24,7 @@ public record ModMetadata : AbstractModMetadata
     public override string Name { get; init; } = "DPX Electronics Case";
     public override string Author { get; init; } = "TKV";
     public override List<string>? Contributors { get; init; }
-    public override SemanticVersioning.Version Version { get; init; } = new("1.0.0");
+    public override SemanticVersioning.Version Version { get; init; } = new("1.1.0");
     public override SemanticVersioning.Range SptVersion { get; init; } = new("~4.0.0");
     public override List<string>? Incompatibilities { get; init; }
     public override Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; }
@@ -62,41 +65,79 @@ internal static class DpxElectronicsCaseInstaller
     private const string SkierId = "58330581ace78e27b8b10cee";
     private const string RoublesTpl = "5449016a4bdc2d6f028b456f";
     private const string BundlePrefabPath = "dpx/electronics_case.bundle";
-    private const int Price = 250000;
+    private const string ElectronicsCategoryTpl = "57864a66245977548f04a81f";
+    private const int DefaultPrice = 250000;
+    private const int DefaultCaseWidth = 3;
+    private const int DefaultCaseHeight = 3;
+    private const int DefaultGridWidth = 10;
+    private const int DefaultGridHeight = 10;
+    private const int DefaultLoyaltyLevel = 1;
+    private const string DefaultTrader = "Skier";
 
-    private static readonly string[] Whitelist =
-    [
-        "5734779624597737e04bf329",
-        "573477e124597737dd42e191",
-        "57347baf24597738002c6178",
-        "590a386e86f77429692b27ab",
-        "5a29276886f77435ed1b117c",
-        "590a3b0486f7743954552bdb",
-        "590c392f86f77444754deb29",
-        "5af0561e86f7745f5f3ad6ac",
-        "5c052f6886f7746b1e3db148",
-        "5c052fb986f7746b2101e909",
-        "5c05300686f7746dce784e5d",
-        "5c05308086f7746b2101e90b",
-        "5d0375ff86f774186372f685",
-        "5d0376a486f7747d8050965c",
-        "6389c7750ef44505c87f5996"
-    ];
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static readonly Dictionary<string, string> TraderIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Prapor"] = "54cb50c76803fa8b248b4571",
+        ["Therapist"] = "54cb57776803fa99248b456e",
+        ["Fence"] = "579dc571d53a0658a154fbec",
+        ["Skier"] = SkierId,
+        ["Peacekeeper"] = "5935c25fb3acc3127c3d8cd9",
+        ["Mechanic"] = "5a7c2eca46aef81a7ca2145d",
+        ["Ragman"] = "5ac3b934156ae10c4430e83c",
+        ["Jaeger"] = "5c0647fdd443bc2504c2d371"
+    };
 
     public static void Apply(ISptLogger<Mod> logger, DatabaseService databaseService, CustomItemService customItemService)
     {
-        ValidateBaseData(databaseService);
-        CreateItem(databaseService, customItemService);
-        ConfigureContainerGrid(databaseService);
-        AddSkierOffer(databaseService);
-        VerifyStartup(logger, databaseService);
+        var config = LoadConfig();
+        ValidateBaseData(databaseService, config);
+        CreateItem(databaseService, customItemService, config);
+        ConfigureContainerGrid(databaseService, config);
+        AddTraderOffer(databaseService, config);
+        VerifyStartup(logger, databaseService, config);
     }
 
-    private static void ValidateBaseData(DatabaseService databaseService)
+    private static ModConfig LoadConfig()
+    {
+        var configPath = GetConfigPath();
+        var defaultConfig = ModConfig.Default();
+
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(configPath)!);
+        if (!File.Exists(configPath))
+        {
+            File.WriteAllText(configPath, JsonSerializer.Serialize(defaultConfig, JsonOptions));
+            return defaultConfig.ToValidated();
+        }
+
+        try
+        {
+            var rawConfig = JsonSerializer.Deserialize<ModConfig>(File.ReadAllText(configPath), JsonOptions);
+            return (rawConfig ?? defaultConfig).ToValidated();
+        }
+        catch
+        {
+            return defaultConfig.ToValidated();
+        }
+    }
+
+    private static string GetConfigPath()
+    {
+        var modFolder = System.IO.Path.GetDirectoryName(typeof(Mod).Assembly.Location)
+            ?? AppContext.BaseDirectory;
+        return System.IO.Path.Combine(modFolder, "config", "config.json");
+    }
+
+    private static void ValidateBaseData(DatabaseService databaseService, ModConfig config)
     {
         var items = databaseService.GetItems();
-        var missing = Whitelist
-            .Concat([ItemCaseTpl, RoublesTpl])
+        var missing = new[] { ItemCaseTpl, RoublesTpl }
             .Where(id => !items.ContainsKey(new MongoId(id)))
             .ToList();
 
@@ -105,13 +146,13 @@ internal static class DpxElectronicsCaseInstaller
             throw new InvalidOperationException($"[{ModName}] missing template id(s): {string.Join(", ", missing)}");
         }
 
-        if (databaseService.GetTrader(new MongoId(SkierId))?.Assort == null)
+        if (databaseService.GetTrader(new MongoId(config.TraderId))?.Assort == null)
         {
-            throw new InvalidOperationException($"[{ModName}] Skier trader/assort not found: {SkierId}");
+            throw new InvalidOperationException($"[{ModName}] trader/assort not found: {config.TraderId}");
         }
     }
 
-    private static void CreateItem(DatabaseService databaseService, CustomItemService customItemService)
+    private static void CreateItem(DatabaseService databaseService, CustomItemService customItemService, ModConfig config)
     {
         var items = databaseService.GetItems();
         items.Remove(new MongoId(DpxCaseTpl));
@@ -123,8 +164,8 @@ internal static class DpxElectronicsCaseInstaller
         SetValue(props, "Name", "DPX Electronics Case");
         SetValue(props, "ShortName", "DPX Elec");
         SetValue(props, "Description", "A rugged storage case designed specifically for electronic components, military electronics, storage devices, processors, circuit boards and advanced technology parts.");
-        SetValue(props, "Width", 3);
-        SetValue(props, "Height", 3);
+        SetValue(props, "Width", config.CaseSize.Width);
+        SetValue(props, "Height", config.CaseSize.Height);
         SetValue(props, "BackgroundColor", "black");
         SetValue(props, "ExaminedByDefault", true);
 
@@ -134,8 +175,8 @@ internal static class DpxElectronicsCaseInstaller
             OverrideProperties = props,
             ParentId = CommonContainerParent,
             NewId = DpxCaseTpl,
-            FleaPriceRoubles = Price,
-            HandbookPriceRoubles = Price,
+            FleaPriceRoubles = config.Price,
+            HandbookPriceRoubles = config.Price,
             HandbookParentId = baseHandbookEntry.ParentId,
             Locales = new Dictionary<string, LocaleDetails>
             {
@@ -168,7 +209,7 @@ internal static class DpxElectronicsCaseInstaller
         SetValue(prefab, "Path", BundlePrefabPath);
     }
 
-    private static void ConfigureContainerGrid(DatabaseService databaseService)
+    private static void ConfigureContainerGrid(DatabaseService databaseService, ModConfig config)
     {
         var item = databaseService.GetItems()[new MongoId(DpxCaseTpl)];
         var props = GetMemberValue(item, "Properties", "Props", "_props")
@@ -187,8 +228,8 @@ internal static class DpxElectronicsCaseInstaller
         var gridProps = GetMemberValue(grid, "Properties", "Props", "_props")
             ?? throw new InvalidOperationException($"[{ModName}] grid props not found");
 
-        SetValue(gridProps, "CellsH", 10);
-        SetValue(gridProps, "CellsV", 10);
+        SetValue(gridProps, "CellsH", config.InternalGrid.Width);
+        SetValue(gridProps, "CellsV", config.InternalGrid.Height);
         SetValue(gridProps, "MinCount", 0d);
         SetValue(gridProps, "MaxCount", 0d);
         SetValue(gridProps, "MaxWeight", 0d);
@@ -199,21 +240,31 @@ internal static class DpxElectronicsCaseInstaller
         var filter = filters.Cast<object>().FirstOrDefault()
             ?? throw new InvalidOperationException($"[{ModName}] grid has no filter entry");
 
-        SetValue(filter, "Filter", Whitelist.Select(id => new MongoId(id)).ToHashSet());
+        SetValue(filter, "Filter", config.FilterIds.Select(id => new MongoId(id)).ToHashSet());
         SetValue(filter, "ExcludedFilter", new HashSet<MongoId>());
     }
 
-    private static void AddSkierOffer(DatabaseService databaseService)
+    private static void AddTraderOffer(DatabaseService databaseService, ModConfig config)
     {
-        var skier = databaseService.GetTrader(new MongoId(SkierId));
-        var assort = skier?.Assort
-            ?? throw new InvalidOperationException($"[{ModName}] Skier assort not found");
+        foreach (var traderId in TraderIds.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var trader = databaseService.GetTrader(new MongoId(traderId));
+            if (trader?.Assort == null)
+            {
+                continue;
+            }
+
+            var oldAssortId = new MongoId(TraderAssortId);
+            trader.Assort.Items.RemoveAll(item => item.Id.Equals(oldAssortId));
+            trader.Assort.BarterScheme.Remove(oldAssortId);
+            trader.Assort.LoyalLevelItems.Remove(oldAssortId);
+        }
+
+        var targetTrader = databaseService.GetTrader(new MongoId(config.TraderId));
+        var assort = targetTrader?.Assort
+            ?? throw new InvalidOperationException($"[{ModName}] trader assort not found: {config.TraderId}");
 
         var assortId = new MongoId(TraderAssortId);
-        assort.Items.RemoveAll(item => item.Id.Equals(assortId));
-        assort.BarterScheme.Remove(assortId);
-        assort.LoyalLevelItems.Remove(assortId);
-
         assort.Items.Add(new Item
         {
             Id = assortId,
@@ -235,14 +286,14 @@ internal static class DpxElectronicsCaseInstaller
                 new BarterScheme
                 {
                     Template = new MongoId(RoublesTpl),
-                    Count = Price
+                    Count = config.Price
                 }
             ]
         ];
-        assort.LoyalLevelItems[assortId] = 1;
+        assort.LoyalLevelItems[assortId] = config.LoyaltyLevel;
     }
 
-    private static void VerifyStartup(ISptLogger<Mod> logger, DatabaseService databaseService)
+    private static void VerifyStartup(ISptLogger<Mod> logger, DatabaseService databaseService, ModConfig config)
     {
         var item = databaseService.GetItems()[new MongoId(DpxCaseTpl)];
         var props = GetMemberValue(item, "Properties", "Props", "_props")!;
@@ -253,17 +304,17 @@ internal static class DpxElectronicsCaseInstaller
         var filter = filters.Single();
         var allowed = ((IEnumerable)GetMemberValue(filter, "Filter")!).Cast<object>().Select(value => value.ToString()).ToList();
 
-        var sizeOk = Convert.ToInt32(GetMemberValue(props, "Width", "width")) == 3
-            && Convert.ToInt32(GetMemberValue(props, "Height", "height")) == 3;
-        var gridOk = Convert.ToInt32(GetMemberValue(gridProps, "CellsH", "cellsH")) == 10
-            && Convert.ToInt32(GetMemberValue(gridProps, "CellsV", "cellsV")) == 10;
-        var filterOk = allowed.Count == Whitelist.Length && !allowed.Except(Whitelist, StringComparer.OrdinalIgnoreCase).Any();
-        var skier = databaseService.GetTrader(new MongoId(SkierId));
+        var sizeOk = Convert.ToInt32(GetMemberValue(props, "Width", "width")) == config.CaseSize.Width
+            && Convert.ToInt32(GetMemberValue(props, "Height", "height")) == config.CaseSize.Height;
+        var gridOk = Convert.ToInt32(GetMemberValue(gridProps, "CellsH", "cellsH")) == config.InternalGrid.Width
+            && Convert.ToInt32(GetMemberValue(gridProps, "CellsV", "cellsV")) == config.InternalGrid.Height;
+        var filterOk = allowed.Count == config.FilterIds.Count && !allowed.Except(config.FilterIds, StringComparer.OrdinalIgnoreCase).Any();
+        var trader = databaseService.GetTrader(new MongoId(config.TraderId));
         var assortId = new MongoId(TraderAssortId);
-        var traderOk = skier?.Assort?.Items.Any(item => item.Id.Equals(assortId) && item.Template.Equals(new MongoId(DpxCaseTpl))) == true
-            && skier.Assort.BarterScheme.ContainsKey(assortId)
-            && skier.Assort.LoyalLevelItems.TryGetValue(assortId, out var loyaltyLevel)
-            && loyaltyLevel == 1;
+        var traderOk = trader?.Assort?.Items.Any(item => item.Id.Equals(assortId) && item.Template.Equals(new MongoId(DpxCaseTpl))) == true
+            && trader.Assort.BarterScheme.ContainsKey(assortId)
+            && trader.Assort.LoyalLevelItems.TryGetValue(assortId, out var loyaltyLevel)
+            && loyaltyLevel == config.LoyaltyLevel;
         var prefabPath = GetMemberValue(GetMemberValue(props, "Prefab", "prefab")!, "Path", "path")?.ToString();
         var prefabOk = string.Equals(prefabPath, BundlePrefabPath, StringComparison.OrdinalIgnoreCase);
 
@@ -273,6 +324,103 @@ internal static class DpxElectronicsCaseInstaller
         }
 
         logger.Info($"[{ModName}] loaded", null);
+    }
+
+    private sealed class ModConfig
+    {
+        public SizeConfig CaseSize { get; set; } = new(DefaultCaseWidth, DefaultCaseHeight);
+        public SizeConfig InternalGrid { get; set; } = new(DefaultGridWidth, DefaultGridHeight);
+        public int Price { get; set; } = DefaultPrice;
+        public string Trader { get; set; } = DefaultTrader;
+        public int LoyaltyLevel { get; set; } = DefaultLoyaltyLevel;
+        public List<string> AcceptedCategories { get; set; } = [ElectronicsCategoryTpl];
+        public List<string> AcceptedItems { get; set; } = [];
+
+        [JsonIgnore]
+        public string TraderId { get; private set; } = SkierId;
+
+        [JsonIgnore]
+        public List<string> FilterIds { get; private set; } = [ElectronicsCategoryTpl];
+
+        public static ModConfig Default()
+        {
+            return new ModConfig
+            {
+                CaseSize = new SizeConfig(DefaultCaseWidth, DefaultCaseHeight),
+                InternalGrid = new SizeConfig(DefaultGridWidth, DefaultGridHeight),
+                Price = DefaultPrice,
+                Trader = DefaultTrader,
+                LoyaltyLevel = DefaultLoyaltyLevel,
+                AcceptedCategories = [ElectronicsCategoryTpl],
+                AcceptedItems = []
+            };
+        }
+
+        public ModConfig ToValidated()
+        {
+            var validatedTrader = TraderIds.ContainsKey(Trader ?? string.Empty) ? Trader! : DefaultTrader;
+            var validated = new ModConfig
+            {
+                CaseSize = new SizeConfig(
+                    Clamp(CaseSize?.Width, 1, 10, DefaultCaseWidth),
+                    Clamp(CaseSize?.Height, 1, 10, DefaultCaseHeight)),
+                InternalGrid = new SizeConfig(
+                    Clamp(InternalGrid?.Width, 1, 20, DefaultGridWidth),
+                    Clamp(InternalGrid?.Height, 1, 20, DefaultGridHeight)),
+                Price = Math.Max(1, Price),
+                Trader = validatedTrader,
+                LoyaltyLevel = Clamp(LoyaltyLevel, 1, 4, DefaultLoyaltyLevel),
+                AcceptedCategories = ValidMongoIds(AcceptedCategories).ToList(),
+                AcceptedItems = ValidMongoIds(AcceptedItems).ToList()
+            };
+
+            validated.TraderId = TraderIds[validatedTrader];
+            validated.FilterIds = validated.AcceptedCategories
+                .Concat(validated.AcceptedItems)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (validated.FilterIds.Count == 0)
+            {
+                validated.AcceptedCategories = [ElectronicsCategoryTpl];
+                validated.FilterIds = [ElectronicsCategoryTpl];
+            }
+
+            return validated;
+        }
+
+        private static int Clamp(int? value, int min, int max, int fallback)
+        {
+            return value is null ? fallback : Math.Min(max, Math.Max(min, value.Value));
+        }
+
+        private static IEnumerable<string> ValidMongoIds(IEnumerable<string>? ids)
+        {
+            return (ids ?? [])
+                .Where(IsValidMongoId)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidMongoId(string? value)
+        {
+            return value?.Length == 24 && value.All(Uri.IsHexDigit);
+        }
+    }
+
+    private sealed class SizeConfig
+    {
+        public SizeConfig()
+        {
+        }
+
+        public SizeConfig(int width, int height)
+        {
+            Width = width;
+            Height = height;
+        }
+
+        public int Width { get; set; }
+        public int Height { get; set; }
     }
 
     private static object? GetMemberValue(object target, params string[] names)
